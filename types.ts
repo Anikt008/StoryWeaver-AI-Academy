@@ -63,13 +63,11 @@ export interface EmotionAnalysisResult {
 }
 
 declare global {
-  interface AIStudio {
-    hasSelectedApiKey(): Promise<boolean>;
-    openSelectKey(): Promise<void>;
-  }
-
   interface Window {
-    aistudio?: AIStudio;
+    aistudio?: {
+      hasSelectedApiKey(): Promise<boolean>;
+      openSelectKey(): Promise<void>;
+    };
     webkitSpeechRecognition: any;
     SpeechRecognition: any;
     confetti: any;

@@ -58,7 +58,7 @@ export const VOICES = [
 ];
 
 /**
- * Generates a complete 4-5 scene story with title and quiz.
+ * Generates a complete 5 scene story with title and quiz.
  */
 export const generateFullStory = async (
   prompt: string,
@@ -68,15 +68,19 @@ export const generateFullStory = async (
   const ai = getAI();
   const modelId = "gemini-3-pro-preview";
 
+  const langInstruction = language === Language.HINDI 
+    ? "Hindi (Hinglish style - conversational mix of Hindi and English words for kids)" 
+    : language;
+
   const systemInstruction = `
     You are StoryWeaver, a world-class educational storyteller.
     Create a captivating, educational story for a ${age}-year-old child.
-    Language: ${language}.
+    Language: ${langInstruction}.
     
     Structure:
     1. Title
-    2. 4 distinct Scenes. Each scene needs 60-80 words of narrative text and a detailed image generation prompt.
-    3. 3 Quiz questions at the end to test comprehension.
+    2. 5 distinct Scenes. Each scene needs 60-80 words of narrative text and a detailed image generation prompt.
+    3. 5 Quiz questions at the end to test comprehension.
 
     Output JSON strictly matching this schema:
     {
