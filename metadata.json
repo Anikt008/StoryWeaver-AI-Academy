@@ -1,0 +1,8 @@
+{
+  "name": "StoryWeaver AI Academy",
+  "description": "An adaptive, multimodal education platform for kids. Generates interactive stories with AR/Video visuals, quizzes, and real-time comprehension monitoring using Gemini 3 Pro and Veo.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
