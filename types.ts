@@ -29,14 +29,22 @@ export interface Quiz {
   feedback: string;
 }
 
-export interface StorySegment {
+export interface StoryScene {
   id: string;
   text: string;
-  mediaPrompt: string; // Used to generate image/video
-  mediaType: 'image' | 'video'; // Determined by AI
-  mediaUrl?: string; // Filled after generation
-  quiz?: Quiz;
-  difficultyLevel: 'simple' | 'standard' | 'advanced';
+  imagePrompt: string;
+  mediaUrl?: string;
+  mediaType: 'image' | 'video';
+  voiceAudio?: ArrayBuffer; // Cache for TTS
+}
+
+export interface FullStory {
+  id: string;
+  title: string;
+  scenes: StoryScene[];
+  quiz: Quiz[];
+  timestamp: number;
+  language: Language;
 }
 
 export interface UserProgress {
@@ -44,8 +52,8 @@ export interface UserProgress {
   storiesCompleted: number;
   quizzesPassed: number;
   totalPoints: number;
-  literacyScore: number[]; // History for chart
-  engagementScore: number[]; // History for chart
+  literacyScore: number[];
+  engagementScore: number[];
 }
 
 export interface EmotionAnalysisResult {
@@ -54,7 +62,6 @@ export interface EmotionAnalysisResult {
   needsSimplification: boolean;
 }
 
-// Global definition for AI Studio environment
 declare global {
   interface AIStudio {
     hasSelectedApiKey(): Promise<boolean>;
@@ -63,5 +70,8 @@ declare global {
 
   interface Window {
     aistudio?: AIStudio;
+    webkitSpeechRecognition: any;
+    SpeechRecognition: any;
+    confetti: any;
   }
 }
