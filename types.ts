@@ -43,6 +43,7 @@ export interface FullStory {
   title: string;
   scenes: StoryScene[];
   quiz: Quiz[];
+  notes?: string[]; // Exam notes/Key takeaways
   timestamp: number;
   language: Language;
 }
@@ -63,9 +64,15 @@ export interface EmotionAnalysisResult {
 }
 
 declare global {
+  interface AIStudio {
+    hasSelectedApiKey: () => Promise<boolean>;
+    openSelectKey: () => Promise<void>;
+  }
+
   interface Window {
     webkitSpeechRecognition: any;
     SpeechRecognition: any;
     confetti: any;
+    // aistudio property is provided by external type definition
   }
 }

@@ -112,34 +112,39 @@ export const generateFullStory = async (
   const ai = getAI();
   
   const langInstruction = language === Language.HINDI 
-    ? "Hindi (Hinglish style - conversational mix of Hindi and English words for kids)" 
+    ? "Hinglish (Conversational mix of Hindi and English, easy for Indian students)" 
     : language;
 
   const systemInstruction = `
-    You are StoryWeaver, a world-class educational storyteller.
-    Create a captivating, educational story for a ${age}-year-old child.
-    Language: ${langInstruction}.
-    
-    Structure:
-    1. Title
-    2. 5 distinct Scenes. Each scene needs 60-80 words of narrative text and a detailed image generation prompt.
-    3. 5 Quiz questions at the end to test comprehension.
+    You are StoryWeaver AI, an educational assistant that explains difficult topics using simple stories.
+    User Topic: ${prompt}
 
-    Output JSON strictly matching this schema:
+    Your task:
+    1. Create a short, engaging story in ${langInstruction}.
+    2. Break the topic into 5 scenes. Each scene must have:
+       - A short paragraph (easy language)
+       - One image idea (for AI image generation)
+    3. Keep the story age-friendly and easy for students (age ${age}).
+    4. Add 3 simple quiz questions at the end.
+    5. Add 5 short exam notes in bullet points (Key Takeaways).
+    6. If the topic is complex, explain it with a real-life example in the story.
+
+    Output format (strictly JSON):
     {
-      "title": "string",
+      "title": "Story Title",
       "scenes": [
-        { "text": "Narrative text...", "imagePrompt": "Visual description...", "mediaType": "image" }
+        { "text": "Scene narrative...", "imagePrompt": "Visual description...", "mediaType": "image" }
       ],
       "quiz": [
         { 
-          "question": "string", 
-          "options": [{"text": "string", "isCorrect": boolean}], 
-          "feedback": "string" 
+          "question": "Question text?", 
+          "options": [{"text": "Option A", "isCorrect": boolean}, {"text": "Option B", "isCorrect": boolean}, ...], 
+          "feedback": "Short explanation." 
         }
-      ]
+      ],
+      "notes": ["Note 1", "Note 2", "Note 3", "Note 4", "Note 5"]
     }
-    Make sure "mediaType" is always "image". Use "video" only if the scene involves high-speed action (racing, flying).
+    Make sure "mediaType" is always "image". Use "video" only if the scene involves high-speed action.
   `;
 
   // Helper to execute generation
@@ -174,6 +179,7 @@ export const generateFullStory = async (
       title: data.title,
       scenes: data.scenes.map((s: any) => ({ ...s, id: generateUUID() })),
       quiz: data.quiz,
+      notes: data.notes,
       timestamp: Date.now(),
       language
     };

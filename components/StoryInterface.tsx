@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { generateFullStory, generateVisuals, generateSpeech, simplifyContent, updateStorySceneMedia, VOICES } from '../services/geminiService';
 import { FullStory, Language, EmotionAnalysisResult, Emotion, StoryScene } from '../types';
-import { Mic, Send, Volume2, Play, CheckCircle, XCircle, Sparkles, AlertTriangle, ArrowRight, ArrowLeft, Download, Share2, Pause, Settings2, Check, RefreshCw } from 'lucide-react';
+import { Mic, Send, Volume2, Play, CheckCircle, XCircle, Sparkles, AlertTriangle, ArrowRight, ArrowLeft, Download, Share2, Pause, Settings2, Check, RefreshCw, BookOpen } from 'lucide-react';
 
 interface StoryInterfaceProps {
   initialPrompt?: string;
@@ -277,8 +277,27 @@ const StoryInterface: React.FC<StoryInterfaceProps> = ({
   // Quiz Mode
   if (isQuizMode) {
       return (
-          <div className="max-w-2xl mx-auto py-8 px-4 animate-fadeIn pb-32">
+          <div className="max-w-3xl mx-auto py-8 px-4 animate-fadeIn pb-32">
               <h2 className="text-3xl font-fredoka text-center mb-8 text-indigo-900 dark:text-white">Adventure Quiz!</h2>
+              
+              {/* Exam Notes / Key Takeaways */}
+              {story.notes && story.notes.length > 0 && (
+                <div className="mb-8 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 rounded-2xl p-6">
+                    <div className="flex items-center gap-2 mb-4">
+                        <BookOpen className="w-6 h-6 text-amber-600 dark:text-amber-400" />
+                        <h3 className="text-xl font-bold text-amber-900 dark:text-amber-100">Key Takeaways</h3>
+                    </div>
+                    <ul className="space-y-2">
+                        {story.notes.map((note, i) => (
+                            <li key={i} className="flex gap-2 text-slate-700 dark:text-slate-200">
+                                <span className="text-amber-500 font-bold">•</span>
+                                {note}
+                            </li>
+                        ))}
+                    </ul>
+                </div>
+              )}
+
               <div className="space-y-6">
                   {story.quiz.map((q, idx) => (
                       <div key={idx} className="bg-white dark:bg-slate-800 p-6 rounded-2xl shadow-lg border border-indigo-50 dark:border-slate-700">
