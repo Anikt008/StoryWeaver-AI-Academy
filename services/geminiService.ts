@@ -3,6 +3,11 @@ import { FullStory, Language, EmotionAnalysisResult, Emotion, StoryScene } from 
 
 const getAI = () => new GoogleGenAI({ apiKey: process.env.API_KEY });
 
+// Robust ID generator that works in all contexts (unlike crypto.randomUUID)
+const generateUUID = () => {
+  return Date.now().toString(36) + Math.random().toString(36).substring(2);
+};
+
 const parseJSON = (text: string) => {
   try {
     // Remove markdown code blocks if present
@@ -24,19 +29,37 @@ const parseJSON = (text: string) => {
   }
 };
 
+const blobToBase64 = (blob: Blob): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(reader.result as string);
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+};
+
 // --- Storage Helpers for Offline Mode ---
 const STORAGE_KEY = 'storyweaver_offline_stories';
 
 export const saveStoryOffline = (story: FullStory) => {
   try {
     const saved = localStorage.getItem(STORAGE_KEY);
-    const stories: FullStory[] = saved ? JSON.parse(saved) : [];
-    // Keep last 5, filter duplicates
-    const filtered = stories.filter(s => s.id !== story.id);
-    const updated = [story, ...filtered].slice(0, 5);
+    let stories: FullStory[] = saved ? JSON.parse(saved) : [];
+    
+    // Remove existing version of this story if it exists (to update it)
+    stories = stories.filter(s => s.id !== story.id);
+    
+    // Add new/updated story to the front
+    const updated = [story, ...stories].slice(0, 5); // Keep max 5
+    
     localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
   } catch (e) {
-    console.warn("Storage full or unavailable", e);
+    if (e instanceof DOMException && (e.name === 'QuotaExceededError' || e.name === 'NS_ERROR_DOM_QUOTA_REACHED')) {
+      console.warn("LocalStorage full. Could not cache story media.");
+      // Optional: Try to clear older stories or save without media as fallback
+    } else {
+      console.warn("Storage unavailable", e);
+    }
   }
 };
 
@@ -46,6 +69,26 @@ export const getOfflineStories = (): FullStory[] => {
     return saved ? JSON.parse(saved) : [];
   } catch (e) {
     return [];
+  }
+};
+
+export const updateStorySceneMedia = (storyId: string, sceneId: string, mediaUrl: string) => {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (!saved) return;
+    
+    const stories: FullStory[] = JSON.parse(saved);
+    const storyIndex = stories.findIndex(s => s.id === storyId);
+    
+    if (storyIndex !== -1) {
+      const sceneIndex = stories[storyIndex].scenes.findIndex(s => s.id === sceneId);
+      if (sceneIndex !== -1) {
+        stories[storyIndex].scenes[sceneIndex].mediaUrl = mediaUrl;
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(stories));
+      }
+    }
+  } catch (e) {
+    console.warn("Failed to update offline story media", e);
   }
 };
 
@@ -59,6 +102,7 @@ export const VOICES = [
 
 /**
  * Generates a complete 5 scene story with title and quiz.
+ * Falls back to Flash model if Pro is unavailable.
  */
 export const generateFullStory = async (
   prompt: string,
@@ -66,8 +110,7 @@ export const generateFullStory = async (
   language: Language
 ): Promise<FullStory | null> => {
   const ai = getAI();
-  const modelId = "gemini-3-pro-preview";
-
+  
   const langInstruction = language === Language.HINDI 
     ? "Hindi (Hinglish style - conversational mix of Hindi and English words for kids)" 
     : language;
@@ -99,24 +142,37 @@ export const generateFullStory = async (
     Make sure "mediaType" is always "image". Use "video" only if the scene involves high-speed action (racing, flying).
   `;
 
-  try {
-    const response = await ai.models.generateContent({
-      model: modelId,
+  // Helper to execute generation
+  const generate = async (model: string, budget?: number) => {
+    return await ai.models.generateContent({
+      model: model,
       contents: `User Prompt: ${prompt}`,
       config: {
         systemInstruction: systemInstruction,
         responseMimeType: "application/json",
-        thinkingConfig: { thinkingBudget: 2048 } // High budget for creativity + logic
+        thinkingConfig: budget ? { thinkingBudget: budget } : undefined
       }
     });
+  };
+
+  try {
+    let response;
+    try {
+      // Try Gemini 3 Pro
+      response = await generate("gemini-3-pro-preview", 2048);
+    } catch (proError) {
+      console.warn("Gemini 3 Pro failed, falling back to Flash", proError);
+      // Fallback to Flash
+      response = await generate("gemini-2.5-flash");
+    }
 
     const data = parseJSON(response.text || "{}");
     if (!data || !data.scenes) throw new Error("Invalid story data");
 
     const story: FullStory = {
-      id: crypto.randomUUID(),
+      id: generateUUID(),
       title: data.title,
-      scenes: data.scenes.map((s: any) => ({ ...s, id: crypto.randomUUID() })),
+      scenes: data.scenes.map((s: any) => ({ ...s, id: generateUUID() })),
       quiz: data.quiz,
       timestamp: Date.now(),
       language
@@ -149,54 +205,91 @@ export const simplifyContent = async (text: string, language: Language): Promise
 
 /**
  * Generates visuals (Image or Video)
+ * Implements fallback strategies for robustness.
+ * Returns Base64 Data URL for persistence.
  */
 export const generateVisuals = async (prompt: string, type: 'image' | 'video'): Promise<string | undefined> => {
   const ai = getAI();
-  try {
-    if (type === 'video') {
-       // Veo generation
-       let operation = await ai.models.generateVideos({
-         model: 'veo-3.1-fast-generate-preview',
-         prompt: prompt + ", 3d animated style, disney pixar style, bright colors",
-         config: {
-           numberOfVideos: 1,
-           resolution: '720p',
-           aspectRatio: '16:9'
-         }
-       });
-
-       while (!operation.done) {
-         await new Promise(resolve => setTimeout(resolve, 8000));
-         operation = await ai.operations.getVideosOperation({operation});
-       }
-
-       const downloadLink = operation.response?.generatedVideos?.[0]?.video?.uri;
-       if (downloadLink) {
-         const res = await fetch(`${downloadLink}&key=${process.env.API_KEY}`);
-         const blob = await res.blob();
-         return URL.createObjectURL(blob);
-       }
-    } else {
-      // Gemini 3 Pro Image
+  
+  // Helper for Flash Image (Fallback)
+  const generateFlashImage = async () => {
+    try {
       const response = await ai.models.generateContent({
-        model: 'gemini-3-pro-image-preview',
+        model: 'gemini-2.5-flash-image',
         contents: {
           parts: [{ text: prompt + ", highly detailed, magical atmosphere, digital art, 8k resolution, soft lighting" }]
         },
-        config: {
-          imageConfig: { aspectRatio: "16:9", imageSize: "1K" }
-        }
       });
-
       for (const part of response.candidates?.[0]?.content?.parts || []) {
         if (part.inlineData) {
           return `data:image/png;base64,${part.inlineData.data}`;
         }
       }
+    } catch (e) {
+      console.error("Flash image fallback failed", e);
     }
+    return undefined;
+  };
+
+  try {
+    // Try Video (Veo) if requested
+    if (type === 'video') {
+       try {
+         let operation = await ai.models.generateVideos({
+           model: 'veo-3.1-fast-generate-preview',
+           prompt: prompt + ", 3d animated style, disney pixar style, bright colors",
+           config: {
+             numberOfVideos: 1,
+             resolution: '720p',
+             aspectRatio: '16:9'
+           }
+         });
+
+         while (!operation.done) {
+           await new Promise(resolve => setTimeout(resolve, 5000));
+           operation = await ai.operations.getVideosOperation({operation});
+         }
+
+         const downloadLink = operation.response?.generatedVideos?.[0]?.video?.uri;
+         if (downloadLink) {
+           const res = await fetch(`${downloadLink}&key=${process.env.API_KEY}`);
+           const blob = await res.blob();
+           // Convert Blob to Base64 for offline persistence
+           return await blobToBase64(blob);
+         }
+       } catch (veoError) {
+         console.warn("Veo generation failed or not permitted, falling back to image generation.", veoError);
+         // Fallback to image generation loop
+       }
+    }
+
+    // Try High-Quality Image (Gemini 3 Pro Image)
+    try {
+        const response = await ai.models.generateContent({
+          model: 'gemini-3-pro-image-preview',
+          contents: {
+            parts: [{ text: prompt + ", highly detailed, magical atmosphere, digital art, 8k resolution, soft lighting" }]
+          },
+          config: {
+            imageConfig: { aspectRatio: "16:9", imageSize: "1K" }
+          }
+        });
+
+        for (const part of response.candidates?.[0]?.content?.parts || []) {
+          if (part.inlineData) {
+            return `data:image/png;base64,${part.inlineData.data}`;
+          }
+        }
+    } catch (proError) {
+        console.warn("Gemini 3 Pro Image failed (403/404), falling back to Flash Image.", proError);
+        return await generateFlashImage();
+    }
+    
+    return await generateFlashImage();
+
   } catch (error) {
-    console.error("Visual Generation Error:", error);
-    return undefined; // UI will show placeholder
+    console.error("Visual Generation Critical Error:", error);
+    return undefined;
   }
 };
 

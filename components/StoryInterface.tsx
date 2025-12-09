@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { generateFullStory, generateVisuals, generateSpeech, simplifyContent, VOICES } from '../services/geminiService';
+import { generateFullStory, generateVisuals, generateSpeech, simplifyContent, updateStorySceneMedia, VOICES } from '../services/geminiService';
 import { FullStory, Language, EmotionAnalysisResult, Emotion, StoryScene } from '../types';
-import { Mic, Send, Volume2, Play, CheckCircle, XCircle, Sparkles, AlertTriangle, ArrowRight, ArrowLeft, Download, Share2, Pause, Settings2, Check } from 'lucide-react';
+import { Mic, Send, Volume2, Play, CheckCircle, XCircle, Sparkles, AlertTriangle, ArrowRight, ArrowLeft, Download, Share2, Pause, Settings2, Check, RefreshCw } from 'lucide-react';
 
 interface StoryInterfaceProps {
   initialPrompt?: string;
@@ -24,8 +24,10 @@ const StoryInterface: React.FC<StoryInterfaceProps> = ({
   const [story, setStory] = useState<FullStory | null>(null);
   const [currentSceneIndex, setCurrentSceneIndex] = useState(0);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [inputText, setInputText] = useState(initialPrompt || "");
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
+  const [isListening, setIsListening] = useState(false);
   const [audioContext, setAudioContext] = useState<AudioContext | null>(null);
   const [quizState, setQuizState] = useState<{ [key: number]: boolean | null }>({}); // index -> isCorrect
   const [simplifying, setSimplifying] = useState(false);
@@ -36,7 +38,7 @@ const StoryInterface: React.FC<StoryInterfaceProps> = ({
 
   // Initial generation
   useEffect(() => {
-    if (initialPrompt && !story && !loading) {
+    if (initialPrompt && !story && !loading && !error) {
       handleGenerate();
     }
   }, []);
@@ -65,21 +67,32 @@ const StoryInterface: React.FC<StoryInterfaceProps> = ({
 
   // Generate Media for current scene when it changes
   useEffect(() => {
-    if (story && !isQuizMode && !isOffline) {
+    if (story && !isQuizMode) {
         const scene = story.scenes[currentSceneIndex];
-        if (!mediaCache[scene.id]) {
+        
+        // Use cached media from story object if available (offline mode support)
+        if (scene.mediaUrl && !mediaCache[scene.id]) {
+            setMediaCache(prev => ({ ...prev, [scene.id]: scene.mediaUrl! }));
+            return;
+        }
+
+        // Otherwise generate fresh media
+        if (!mediaCache[scene.id] && !isOffline) {
             generateVisuals(scene.imagePrompt, scene.mediaType).then(url => {
                 if (url) {
                     setMediaCache(prev => ({ ...prev, [scene.id]: url }));
+                    // IMPORTANT: Persist the generated media to the offline story storage
+                    updateStorySceneMedia(story.id, scene.id, url);
                 }
             });
         }
     }
-  }, [story, currentSceneIndex, isQuizMode]);
+  }, [story, currentSceneIndex, isQuizMode, isOffline]);
 
   const handleGenerate = async () => {
     if (!inputText.trim()) return;
     setLoading(true);
+    setError(null);
     setStory(null);
     setCurrentSceneIndex(0);
     setMediaCache({});
@@ -92,6 +105,16 @@ const StoryInterface: React.FC<StoryInterfaceProps> = ({
     if (newStory) {
       setStory(newStory);
       setInputText("");
+      
+      // Pre-populate media cache with any existing mediaUrls (e.g. from offline load)
+      const initialCache: {[key: string]: string} = {};
+      newStory.scenes.forEach(s => {
+          if(s.mediaUrl) initialCache[s.id] = s.mediaUrl;
+      });
+      setMediaCache(initialCache);
+
+    } else {
+      setError("Oops! Creating this story was a bit too tricky. Please try a different topic.");
     }
     setLoading(false);
   };
@@ -131,17 +154,50 @@ const StoryInterface: React.FC<StoryInterfaceProps> = ({
     }
   };
 
+  const playQuizSound = (isCorrect: boolean) => {
+    const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    const oscillator = ctx.createOscillator();
+    const gainNode = ctx.createGain();
+    
+    oscillator.connect(gainNode);
+    gainNode.connect(ctx.destination);
+    
+    if (isCorrect) {
+        // Happy major chord arpeggio
+        oscillator.type = 'sine';
+        oscillator.frequency.setValueAtTime(523.25, ctx.currentTime); // C5
+        oscillator.frequency.exponentialRampToValueAtTime(659.25, ctx.currentTime + 0.1); // E5
+        gainNode.gain.setValueAtTime(0.3, ctx.currentTime);
+        gainNode.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.5);
+        oscillator.start();
+        oscillator.stop(ctx.currentTime + 0.5);
+    } else {
+        // Gentle buzz
+        oscillator.type = 'sawtooth';
+        oscillator.frequency.setValueAtTime(150, ctx.currentTime);
+        gainNode.gain.setValueAtTime(0.1, ctx.currentTime);
+        gainNode.gain.linearRampToValueAtTime(0.01, ctx.currentTime + 0.3);
+        oscillator.start();
+        oscillator.stop(ctx.currentTime + 0.3);
+    }
+  };
+
   const startVoiceInput = () => {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (SpeechRecognition) {
       const recognition = new SpeechRecognition();
       recognition.lang = language === Language.HINDI ? 'hi-IN' : (language === Language.SPANISH ? 'es-ES' : 'en-US');
       recognition.start();
+      setIsListening(true);
+      
       recognition.onresult = (event: any) => {
         const transcript = event.results[0][0].transcript;
         setInputText(transcript);
-        // Auto-submit if confidence high?
+        setIsListening(false);
       };
+      
+      recognition.onerror = () => setIsListening(false);
+      recognition.onend = () => setIsListening(false);
     } else {
       alert("Voice input not supported in this browser.");
     }
@@ -153,6 +209,8 @@ const StoryInterface: React.FC<StoryInterfaceProps> = ({
 
   const handleQuizAnswer = (qIndex: number, isCorrect: boolean) => {
     setQuizState(prev => ({ ...prev, [qIndex]: isCorrect }));
+    playQuizSound(isCorrect);
+    
     if (isCorrect) {
         if (window.confetti) {
             window.confetti({
@@ -183,19 +241,33 @@ const StoryInterface: React.FC<StoryInterfaceProps> = ({
     return (
         <div className="max-w-xl mx-auto mt-20 p-8 bg-white dark:bg-slate-800 rounded-3xl shadow-xl text-center">
              <h2 className="text-2xl font-bold mb-4 dark:text-white">Start Your Journey</h2>
+             
+             {error && (
+                 <div className="mb-4 p-4 bg-red-50 text-red-600 rounded-xl flex items-center justify-center gap-2">
+                     <AlertTriangle className="w-5 h-5" />
+                     {error}
+                 </div>
+             )}
+
              <div className="flex gap-2">
                  <input 
-                    className="flex-1 p-4 rounded-xl border-2 border-indigo-100 dark:border-slate-600 dark:bg-slate-700 dark:text-white focus:outline-none focus:border-indigo-500"
+                    className="flex-1 p-4 rounded-xl border-2 border-indigo-100 dark:border-slate-600 dark:bg-slate-700 dark:text-white focus:outline-none focus:border-indigo-500 transition-colors"
                     placeholder="E.g., A magical tiger in Mumbai..."
                     value={inputText}
                     onChange={e => setInputText(e.target.value)}
                     onKeyDown={e => e.key === 'Enter' && handleGenerate()}
                  />
-                 <button onClick={startVoiceInput} className="p-4 bg-slate-100 dark:bg-slate-700 rounded-xl hover:bg-slate-200">
-                    <Mic className="w-6 h-6 text-indigo-600" />
+                 <button 
+                    onClick={startVoiceInput} 
+                    className={`p-4 rounded-xl transition-all ${isListening ? 'bg-red-100 text-red-600 animate-pulse ring-2 ring-red-400' : 'bg-slate-100 dark:bg-slate-700 hover:bg-slate-200'}`}
+                 >
+                    <Mic className={`w-6 h-6 ${isListening ? 'text-red-600' : 'text-indigo-600'}`} />
                  </button>
              </div>
-             <button onClick={handleGenerate} className="mt-4 w-full bg-indigo-600 text-white py-4 rounded-xl font-bold hover:bg-indigo-700">
+             {isListening && <p className="text-sm text-slate-500 mt-2 animate-bounce">Listening...</p>}
+             
+             <button onClick={handleGenerate} className="mt-4 w-full bg-indigo-600 text-white py-4 rounded-xl font-bold hover:bg-indigo-700 transition-transform hover:scale-[1.02] flex items-center justify-center gap-2">
+                 <Sparkles className="w-5 h-5" />
                  Generate Story
              </button>
         </div>

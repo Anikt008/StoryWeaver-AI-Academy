@@ -30,36 +30,50 @@ const WebcamMonitor: React.FC<WebcamMonitorProps> = ({ onEmotionDetected, isActi
     if (isActive) {
       startCamera();
     } else {
+      // Stop tracks immediately if not active
       if (videoRef.current && videoRef.current.srcObject) {
-        const tracks = (videoRef.current.srcObject as MediaStream).getTracks();
-        tracks.forEach(track => track.stop());
+        const currentStream = videoRef.current.srcObject as MediaStream;
+        currentStream.getTracks().forEach(track => track.stop());
+        videoRef.current.srcObject = null;
       }
     }
 
     return () => {
-      if (stream) stream.getTracks().forEach(track => track.stop());
+      if (stream) {
+          stream.getTracks().forEach(track => track.stop());
+      }
+      if (videoRef.current && videoRef.current.srcObject) {
+         const currentStream = videoRef.current.srcObject as MediaStream;
+         currentStream.getTracks().forEach(track => track.stop());
+      }
     };
   }, [isActive]);
 
   useEffect(() => {
     if (!isActive) {
-      if (intervalRef.current) window.clearInterval(intervalRef.current);
+      if (intervalRef.current) {
+          window.clearInterval(intervalRef.current);
+          intervalRef.current = null;
+      }
       return;
     }
 
     // Check emotion every 10 seconds (as per requirements)
     intervalRef.current = window.setInterval(async () => {
       if (videoRef.current && canvasRef.current && !videoRef.current.paused && !videoRef.current.ended) {
-        const context = canvasRef.current.getContext('2d');
-        if (context) {
-          context.drawImage(videoRef.current, 0, 0, 320, 240);
-          try {
-            const base64Data = canvasRef.current.toDataURL('image/jpeg', 0.6).split(',')[1];
-            const result = await analyzeLearnerEmotion(base64Data);
-            onEmotionDetected(result);
-          } catch(e) {
-            console.error("Analysis failed", e);
-          }
+        // Ensure video is actually playing and has dimensions
+        if (videoRef.current.readyState === videoRef.current.HAVE_ENOUGH_DATA) {
+            const context = canvasRef.current.getContext('2d');
+            if (context) {
+              context.drawImage(videoRef.current, 0, 0, 320, 240);
+              try {
+                const base64Data = canvasRef.current.toDataURL('image/jpeg', 0.6).split(',')[1];
+                const result = await analyzeLearnerEmotion(base64Data);
+                onEmotionDetected(result);
+              } catch(e) {
+                console.error("Analysis failed", e);
+              }
+            }
         }
       }
     }, 10000); 
